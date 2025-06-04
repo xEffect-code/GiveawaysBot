@@ -1,21 +1,20 @@
 import json
 import uuid
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ContentType, Message
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
-from config import ADMIN_CHAT_ID, CHANNEL_ID
-from fsm_states import BuySticker, Application
-from settings import get_settings
+from config import ADMIN_CHAT_ID, CHANNEL_ID, ADMIN_ID
+from fsm_states import BuySticker, Application, AdminPanel
+from settings import get_settings, update_settings
 from support_status import is_support_open
-from config import ADMIN_ID
 
-dp = Dispatcher(storage=MemoryStorage())
+router = Router()
+
 ack_messages = {}
 code_to_user = {}
 
-@dp.message(Command("start"))
+@router.message(Command("start"))
 async def cmd_start(message: types.Message):
     invite_link = f"https://t.me/c/{str(CHANNEL_ID)[4:]}/"
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -24,7 +23,76 @@ async def cmd_start(message: types.Message):
     ])
     await message.answer("Привет! Чтобы участвовать в розыгрыше, подпишись на канал и нажми «Проверить подписку».", reply_markup=kb)
 
-@dp.callback_query(lambda c: c.data == "check_sub")
+@router.message(Command("myid"))
+async def my_id(message: Message):
+    await message.answer(f"Ваш user_id: {message.from_user.id}")
+
+@router.message(Command("admin"))
+async def admin_panel(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return await message.answer("❌ Доступ запрещён")
+    settings = get_settings()
+    price = settings.get("price_per_ticket", "не задано")
+    photo = settings.get("payment_image_file_id", "не загружено")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📌 Изменить цену билета", callback_data="admin_change_price")],
+        [InlineKeyboardButton(text="🖼 Загрузить фото оплаты", callback_data="admin_change_image")],
+        [InlineKeyboardButton(text="📄 Посмотреть текущие настройки", callback_data="admin_view_settings")]
+    ])
+    text = (
+        f"🔧 <b>Админ-панель</b>\n\n"
+        f"💵 Цена билета: <b>{price}</b> руб.\n"
+        f"🖼 Фото для оплаты: <code>{photo}</code>"
+    )
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(lambda c: c.data == "admin_view_settings")
+async def view_settings(callback: CallbackQuery):
+    settings = get_settings()
+    price = settings.get("price_per_ticket", "не задано")
+    photo = settings.get("payment_image_file_id", "не загружено")
+    text = (
+        f"💵 Цена билета: <b>{price}</b> руб.\n"
+        f"🖼 Фото для оплаты: <code>{photo}</code>"
+    )
+    await callback.message.answer(text, parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(lambda c: c.data == "admin_change_price")
+async def change_price(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите новую цену билета (например, 1000):")
+    await state.set_state(AdminPanel.waiting_new_price)
+    await callback.answer()
+
+@router.message(AdminPanel.waiting_new_price)
+async def set_price(message: Message, state: FSMContext):
+    text = message.text.strip().replace(',', '.')
+    try:
+        price = float(text)
+    except Exception:
+        return await message.answer("❗ Введите число (например, 950)")
+    update_settings({"price_per_ticket": price})
+    await message.answer(f"✅ Цена обновлена: {price:.2f} руб.")
+    await state.clear()
+
+@router.callback_query(lambda c: c.data == "admin_change_image")
+async def change_image(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Пришлите фото, которое будет отображаться перед оплатой.")
+    await state.set_state(AdminPanel.waiting_new_image)
+    await callback.answer()
+
+@router.message(AdminPanel.waiting_new_image, lambda m: m.photo is not None)
+async def set_image(message: Message, state: FSMContext):
+    file_id = message.photo[-1].file_id
+    update_settings({"payment_image_file_id": file_id})
+    await message.answer("✅ Фото для оплаты обновлено.")
+    await state.clear()
+
+@router.message(AdminPanel.waiting_new_image)
+async def wrong_image(message: Message):
+    await message.answer("❗ Пожалуйста, пришлите изображение.")
+
+@router.callback_query(lambda c: c.data == "check_sub")
 async def check_subscription(callback: CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     try:
@@ -40,14 +108,14 @@ async def check_subscription(callback: CallbackQuery, bot: Bot):
         await callback.message.answer("⚠ Не удалось проверить подписку. Попробуйте позже.")
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data == "start_buy")
+@router.callback_query(lambda c: c.data == "start_buy")
 async def start_buy_sticker(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     price = get_settings()["price_per_ticket"]
     await callback.message.answer(f"📋 Напишите, сколько стикеров вы хотите купить (числом). Цена одного — {price:.2f} руб.")
     await state.set_state(BuySticker.waiting_qty)
 
-@dp.message(StateFilter(BuySticker.waiting_qty))
+@router.message(StateFilter(BuySticker.waiting_qty))
 async def process_qty(message: types.Message, state: FSMContext):
     text = message.text.strip()
     if not text.isdigit() or int(text) <= 0:
@@ -63,7 +131,7 @@ async def process_qty(message: types.Message, state: FSMContext):
     await message.answer("✏ Укажите ваше ФИО:")
     await state.set_state(Application.waiting_fio)
 
-@dp.message(StateFilter(Application.waiting_fio))
+@router.message(StateFilter(Application.waiting_fio))
 async def process_fio(message: types.Message, state: FSMContext):
     if not message.text:
         await message.answer("❗ Пожалуйста, отправьте ваше ФИО текстом.")
@@ -76,7 +144,7 @@ async def process_fio(message: types.Message, state: FSMContext):
     await message.answer("📱 Укажите номер телефона:")
     await state.set_state(Application.waiting_phone)
 
-@dp.message(StateFilter(Application.waiting_phone))
+@router.message(StateFilter(Application.waiting_phone))
 async def process_phone(message: types.Message, state: FSMContext):
     if not message.text:
         await message.answer("❗ Пожалуйста, отправьте номер телефона текстом.")
@@ -89,7 +157,7 @@ async def process_phone(message: types.Message, state: FSMContext):
     await message.answer("📸 Пришлите скрин или фото чека:")
     await state.set_state(Application.waiting_photo)
 
-@dp.message(StateFilter(Application.waiting_photo), lambda m: m.content_type in (ContentType.PHOTO, ContentType.DOCUMENT))
+@router.message(StateFilter(Application.waiting_photo), lambda m: m.content_type in (ContentType.PHOTO, ContentType.DOCUMENT))
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot):
     file_id = message.photo[-1].file_id if message.photo else message.document.file_id
     data = await state.get_data()
@@ -105,7 +173,7 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot):
     await message.answer("✅ Ваша заявка отправлена. Ожидайте подтверждение.")
     await state.clear()
 
-@dp.callback_query(lambda c: c.data.startswith("approve:") or c.data.startswith("reject:"))
+@router.callback_query(lambda c: c.data.startswith("approve:") or c.data.startswith("reject:"))
 async def handle_decision(callback: CallbackQuery, bot: Bot):
     action, code = callback.data.split(":")
     user_id = code_to_user.get(code)
@@ -129,15 +197,15 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
     await callback.answer("Готово.")
 
 # ---------------------------
-# БЛОКИРОВКА ЛЮБЫХ ЛИЧНЫХ СООБЩЕНИЙ ВНЕ СЦЕНАРИЯ
+# БЛОКИРОВКА ЛЮБЫХ ЛИЧНЫХ СООБЩЕНИЙ ВНЕ СЦЕНАРИЯ (СТРОГО В КОНЦЕ ФАЙЛА)
 # ---------------------------
-@dp.message(StateFilter(None))
+@router.message(StateFilter(None))
 async def block_any_message(message: types.Message, state: FSMContext):
-    # Разрешаем писать в поддержку, если открыто support окно
-    if is_support_open(message.from_user.id):
+    # Разрешаем команды (не блокируем сообщения, которые начинаются с '/')
+    if message.text and message.text.startswith('/'):
         return
     # Разрешаем администратору любые сообщения
     if message.from_user.id == ADMIN_ID:
         return
-    # Всё остальное блокируем (никаких ответов, сообщения не отправляются менеджерам)
+    # Всё остальное блокируем
     pass

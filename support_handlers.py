@@ -143,4 +143,11 @@ async def end_chat(message: Message):
 # --- Блокирующий хендлер! --- ДОЛЖЕН быть самым последним!
 @router.message(lambda m: m.chat.type == "private" and not is_support_open(m.from_user.id) and m.from_user.id != ADMIN_ID)
 async def block_any_message(message: Message):
+    # Разрешаем команды, чтобы не мешать админке
+    if message.text and message.text.startswith('/'):
+        return
+    # Разрешаем админу всё
+    if message.from_user.id == ADMIN_ID:
+        return
+    # Всё остальное блокируем
     pass

@@ -8,9 +8,6 @@ from settings import get_settings, update_settings
 
 router = Router()
 
-def setup_admin(dp):
-    dp.include_router(router)
-
 @router.message(Command("admin"))
 async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -23,7 +20,11 @@ async def admin_panel(message: Message):
         [InlineKeyboardButton(text="🖼 Загрузить фото оплаты", callback_data="admin_change_image")],
         [InlineKeyboardButton(text="📄 Посмотреть текущие настройки", callback_data="admin_view_settings")]
     ])
-    text = f"🔧 <b>Админ-панель</b>\n\n💵 Цена билета: <b>{price}</b> руб.\n🖼 Фото для оплаты: <code>{photo}</code>"
+    text = (
+        f"🔧 <b>Админ-панель</b>\n\n"
+        f"💵 Цена билета: <b>{price}</b> руб.\n"
+        f"🖼 Фото для оплаты: <code>{photo}</code>"
+    )
     await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @router.callback_query(F.data == "admin_view_settings")
@@ -31,7 +32,10 @@ async def view_settings(callback: CallbackQuery):
     settings = get_settings()
     price = settings.get("price_per_ticket", "не задано")
     photo = settings.get("payment_image_file_id", "не загружено")
-    text = f"💵 Цена билета: <b>{price}</b> руб.\n🖼 Фото для оплаты: <code>{photo}</code>"
+    text = (
+        f"💵 Цена билета: <b>{price}</b> руб.\n"
+        f"🖼 Фото для оплаты: <code>{photo}</code>"
+    )
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
@@ -43,10 +47,11 @@ async def change_price(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AdminPanel.waiting_new_price)
 async def set_price(message: Message, state: FSMContext):
-    text = message.text.strip()
-    if not text.replace(".", "", 1).isdigit():
+    text = message.text.strip().replace(',', '.')
+    try:
+        price = float(text)
+    except Exception:
         return await message.answer("❗ Введите число (например, 950)")
-    price = float(text)
     update_settings({"price_per_ticket": price})
     await message.answer(f"✅ Цена обновлена: {price:.2f} руб.")
     await state.clear()
