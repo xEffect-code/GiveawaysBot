@@ -1,15 +1,15 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
-from config import MANAGER_CHAT_ID
+from config import MANAGER_CHAT_ID, ADMIN_ID
+from support_status import is_support_open, set_support_open
 import json
 from pathlib import Path
-from support_status import is_support_open, set_support_open
 
 router = Router()
 
 MAP_PATH = Path("support_message_map.json")
-USER_WARNED_PATH = Path("support_user_warned.json")  # для одноразового уведомления
+USER_WARNED_PATH = Path("support_user_warned.json")
 
 def load_map():
     if MAP_PATH.exists():
@@ -49,17 +49,10 @@ async def test_send(message: Message):
     except Exception as e:
         await message.answer(f"❌ Ошибка при ручной отправке: {e}")
 
-@router.message(lambda m: m.chat.type == "private")
+# --------- ИЗМЕНИЛ ЭТОТ ХЕНДЛЕР! ---------
+@router.message(lambda m: m.chat.type == "private" and is_support_open(m.from_user.id))
 async def forward_to_manager(message: Message):
     user_id = message.from_user.id
-    if not is_support_open(user_id):
-        # Отправлять сообщение только один раз за сессию — чтобы не раздражать пользователя
-        if not user_warned.get(str(user_id)):
-            await message.answer("Чтобы связаться с менеджером, нажмите кнопку \"Связь с менеджером\" в меню или после отклонения заявки.")
-            user_warned[str(user_id)] = True
-            save_warned(user_warned)
-        return
-
     username = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
     header = f"👤 Пользователь ({username}) | ID: {user_id} пишет:"
 
@@ -84,6 +77,8 @@ async def forward_to_manager(message: Message):
         save_map(message_map)
 
     await message.answer("✅ Сообщение отправлено нашим менеджерам, ожидайте ответа.")
+
+# ------------------
 
 @router.message(lambda m: m.chat.id == MANAGER_CHAT_ID and m.reply_to_message is not None)
 async def reply_to_user(message: Message):
@@ -133,7 +128,6 @@ async def reply_to_user(message: Message):
     except Exception as e:
         await message.reply(f"❗ Ошибка при отправке пользователю: {e}")
 
-# Команда для менеджеров: завершить чат (закрыть поддержку для пользователя)
 @router.message(Command("endchat"))
 async def end_chat(message: Message):
     if message.reply_to_message:
@@ -145,3 +139,8 @@ async def end_chat(message: Message):
             return
         set_support_open(target_id, False)
         await message.reply("❎ Чат с пользователем завершён. Теперь пользователь не может писать менеджеру.")
+
+# --- Блокирующий хендлер! --- ДОЛЖЕН быть самым последним!
+@router.message(lambda m: m.chat.type == "private" and not is_support_open(m.from_user.id) and m.from_user.id != ADMIN_ID)
+async def block_any_message(message: Message):
+    pass

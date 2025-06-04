@@ -2,12 +2,14 @@ import json
 import uuid
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command, StateFilter
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ContentType
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ContentType, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import ADMIN_CHAT_ID, CHANNEL_ID
 from fsm_states import BuySticker, Application
 from settings import get_settings
+from support_status import is_support_open
+from config import ADMIN_ID
 
 dp = Dispatcher(storage=MemoryStorage())
 ack_messages = {}
@@ -125,3 +127,17 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
         await bot.send_message(user_id, msg, parse_mode="Markdown", reply_markup=kb)
 
     await callback.answer("Готово.")
+
+# ---------------------------
+# БЛОКИРОВКА ЛЮБЫХ ЛИЧНЫХ СООБЩЕНИЙ ВНЕ СЦЕНАРИЯ
+# ---------------------------
+@dp.message(StateFilter(None))
+async def block_any_message(message: types.Message, state: FSMContext):
+    # Разрешаем писать в поддержку, если открыто support окно
+    if is_support_open(message.from_user.id):
+        return
+    # Разрешаем администратору любые сообщения
+    if message.from_user.id == ADMIN_ID:
+        return
+    # Всё остальное блокируем (никаких ответов, сообщения не отправляются менеджерам)
+    pass
