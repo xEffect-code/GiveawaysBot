@@ -8,6 +8,7 @@ from config import ADMIN_CHAT_ID, CHANNEL_ID, ADMIN_ID
 from fsm_states import BuySticker, Application, AdminPanel
 from settings import get_settings, update_settings
 from support_status import is_support_open
+from config import CHANNEL_LINK
 
 router = Router()
 
@@ -16,16 +17,14 @@ code_to_user = {}
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
-    invite_link = f"https://t.me/c/{str(CHANNEL_ID)[4:]}/"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Подписаться", url=invite_link)],
+        [InlineKeyboardButton(text="Подписаться на канал", url=CHANNEL_LINK)],
         [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
     ])
-    await message.answer("Привет! Чтобы участвовать в розыгрыше, подпишись на канал и нажми «Проверить подписку».", reply_markup=kb)
-
-@router.message(Command("myid"))
-async def my_id(message: Message):
-    await message.answer(f"Ваш user_id: {message.from_user.id}")
+    await message.answer(
+        "Привет! Чтобы участвовать в розыгрыше, подпишись на канал и нажми «Проверить подписку».",
+        reply_markup=kb
+    )
 
 @router.message(Command("admin"))
 async def admin_panel(message: Message, state: FSMContext):
@@ -128,7 +127,7 @@ async def process_qty(message: types.Message, state: FSMContext):
     if settings["payment_image_file_id"]:
         await message.answer_photo(settings["payment_image_file_id"])
     await message.answer(f"📌 Для покупки {qty} стикеров оплатите сумму: *{total:.2f} руб.*\n\n🔗 Ссылка: https://example.com/pay?amount={total:.2f}", parse_mode="Markdown")
-    await message.answer("✏ Укажите ваше ФИО:")
+    await message.answer("✏ Для получения номера билета, пожалуйста укажите ваше ФИО:")
     await state.set_state(Application.waiting_fio)
 
 @router.message(StateFilter(Application.waiting_fio))
@@ -141,7 +140,7 @@ async def process_fio(message: types.Message, state: FSMContext):
         await message.answer("Укажите имя и фамилию.")
         return
     await state.update_data(fio=fio)
-    await message.answer("📱 Укажите номер телефона:")
+    await message.answer("📱 Укажите номер телефона в формате +79999999999:")
     await state.set_state(Application.waiting_phone)
 
 @router.message(StateFilter(Application.waiting_phone))
@@ -154,7 +153,7 @@ async def process_phone(message: types.Message, state: FSMContext):
         await message.answer("Неверный формат телефона.")
         return
     await state.update_data(phone=phone)
-    await message.answer("📸 Пришлите скрин или фото чека:")
+    await message.answer("📸 Пришлите скрин или фото чека об оплате:")
     await state.set_state(Application.waiting_photo)
 
 @router.message(StateFilter(Application.waiting_photo), lambda m: m.content_type in (ContentType.PHOTO, ContentType.DOCUMENT))
@@ -170,7 +169,7 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot):
          InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{code}")]
     ])
     await bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=file_id, caption=text, parse_mode="Markdown", reply_markup=kb)
-    await message.answer("✅ Ваша заявка отправлена. Ожидайте подтверждение.")
+    await message.answer("✅ Ваша заявка заявка на участие в розыгрыше отправлена. Ожидайте подтверждение.")
     await state.clear()
 
 @router.callback_query(lambda c: c.data.startswith("approve:") or c.data.startswith("reject:"))
