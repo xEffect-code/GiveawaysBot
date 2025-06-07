@@ -14,6 +14,7 @@ router = Router()
 
 ack_messages = {}
 code_to_user = {}
+user_codes = {}  # Новый словарь: code -> [codes]
 
 def get_users():
     try:
@@ -292,19 +293,31 @@ async def process_phone(message: types.Message, state: FSMContext):
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot):
     file_id = message.photo[-1].file_id if message.photo else message.document.file_id
     data = await state.get_data()
-    code = uuid.uuid4().hex[:8].upper()
-    code_to_user[code] = message.from_user.id
-    ack_messages[message.from_user.id] = code
-    text = f"🎟 *Новая заявка #{code}*\n\n👤 {data['fio']}\n📱 {data['phone']}\n📦 {data['qty']} стикеров\n🖼 Фото чека:"
+    qty = data['qty']
+    codes = [uuid.uuid4().hex[:8].upper() for _ in range(qty)]
+    await state.update_data(codes=codes)
+    code_to_user[codes[0]] = message.from_user.id
+    ack_messages[message.from_user.id] = codes[0]
+    user_codes[codes[0]] = codes  # Сохраняем список кодов для этой заявки
+
+    codes_str = "\n".join(f"`{c}`" for c in codes)
+    text = (
+        f"🎟 *Новая заявка*\n\n"
+        f"👤 {data['fio']}\n"
+        f"📱 {data['phone']}\n"
+        f"📦 {qty} стикеров\n"
+        f"🆔 Коды:\n{codes_str}\n"
+        f"🖼 Фото чека:"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"approve:{code}"),
-         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{code}")]
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"approve:{codes[0]}"),
+         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{codes[0]}")]
     ])
     await bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=file_id, caption=text, parse_mode="Markdown", reply_markup=kb)
-    await message.answer("✅ Ваша заявка заявка на участие в розыгрыше отправлена. Ожидайте подтверждение.")
+    await message.answer("✅ Ваша заявка на участие в розыгрыше отправлена. Ожидайте подтверждение.")
     await state.clear()
 
-# --- ОБРАБОТКА ЗАЯВОК (без кнопки "Связь с менеджером") ---
+# --- ОБРАБОТКА ЗАЯВОК (без кнопки "Связь с менеджером", с выдачей всех кодов) ---
 
 @router.callback_query(lambda c: c.data.startswith("approve:") or c.data.startswith("reject:"))
 async def handle_decision(callback: CallbackQuery, bot: Bot):
@@ -315,7 +328,9 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
         return
 
     if action == "approve":
-        msg = f"✅ Ваша заявка *одобрена!* (номер: #{code})"
+        codes_list = user_codes.get(code, [code])
+        codes_str = "\n".join(f"`{c}`" for c in codes_list)
+        msg = f"✅ Ваша заявка *одобрена!*\n\nВаши коды:\n{codes_str}"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Купить ещё стикеры", callback_data="start_buy")]
         ])
