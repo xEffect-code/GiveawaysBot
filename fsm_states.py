@@ -11,3 +11,6 @@ class Application(StatesGroup):
 class AdminPanel(StatesGroup):
     waiting_new_price = State()
     waiting_new_image = State()
+    waiting_broadcast = State()  # Для текста рассылки
+    waiting_broadcast_media = State()  # Для медиа рассылки
+    confirm_broadcast = State()  # Для подтверждения рассылки
