@@ -397,22 +397,36 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
     except Exception:
         pass
 
+    buy_more_kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Купить ещё стикеры", callback_data="start_buy")]]
+    )
+
     if action == "approve":
         codes_list = user_codes.get(code, [code])
-        codes_str = "\n".join(f"`{c}`" for c in codes_list)
-        msg = f"✅ Ваша заявка *одобрена!*\n\nВаши коды:\n{codes_str}"
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Купить ещё стикеры", callback_data="start_buy")]
-        ])
-        await bot.send_message(user_id, msg, parse_mode="Markdown", reply_markup=kb)
+        codes_str = "\n".join(f"#{c}" for c in codes_list)
+        msg = (
+            "✅ Вы все сделали правильно, спасибо!\n"
+            "Ваша заявка подтверждена ✅\n\n"
+            "🎟️ Вот список ваших купленных стикеров - билетов:\n"
+            f"{codes_str}\n\n"
+            "🍀 Желаем удачи в розыгрыше!\n\n"
+            "👇 Хотите увеличить шансы?\n"
+            "Вы можете приобрести ещё стикеры, гоу 👇"
+        )
+        await bot.send_message(user_id, msg, reply_markup=buy_more_kb)
         await bot.send_message(
             ADMIN_CHAT_ID,
             f"✅ Заявка пользователя {user_display} подтверждена",
             reply_to_message_id=callback.message.message_id
         )
     else:
-        msg = "❌ Ваша заявка *отклонена!*"
-        await bot.send_message(user_id, msg, parse_mode="Markdown")
+        msg = (
+            "❌ Ваша заявка отклонена.\n\n"
+            "❗️Возможно, вы допустили ошибку при заполнении данных — наш оператор не нашёл вашего платежа.\n\n"
+            "💸 Если вы оформили заявку ошибочно, нажмите на кнопку ниже и создайте новую.\n\n"
+            "🤝 Если вы уверены, что всё сделали правильно, и считаете что заявка отклонена по ошибке — пожалуйста, свяжитесь с нашим администратором @CuttySark_81"
+        )
+        await bot.send_message(user_id, msg, reply_markup=buy_more_kb)
         await bot.send_message(
             ADMIN_CHAT_ID,
             f"❌ Заявка пользователя {user_display} отклонена",
@@ -420,6 +434,9 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
         )
 
     await callback.answer("Готово.")
+
+
+
 
 # ---------------------------
 # БЛОКИРОВКА ЛЮБЫХ ЛИЧНЫХ СООБЩЕНИЙ ВНЕ СЦЕНАРИЯ (СТРОГО В КОНЦЕ ФАЙЛА)
