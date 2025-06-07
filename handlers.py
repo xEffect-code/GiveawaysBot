@@ -383,6 +383,20 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
         await callback.answer("❗ Пользователь не найден.")
         return
 
+    # Получаем username пользователя
+    chat_member = await bot.get_chat_member(user_id=user_id, chat_id=user_id)
+    username = chat_member.user.username
+    if username:
+        user_display = f"@{username}"
+    else:
+        user_display = f"id{user_id}"
+
+    # Удаляем кнопки под исходной заявкой
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
     if action == "approve":
         codes_list = user_codes.get(code, [code])
         codes_str = "\n".join(f"`{c}`" for c in codes_list)
@@ -391,9 +405,19 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
             [InlineKeyboardButton(text="Купить ещё стикеры", callback_data="start_buy")]
         ])
         await bot.send_message(user_id, msg, parse_mode="Markdown", reply_markup=kb)
+        await bot.send_message(
+            ADMIN_CHAT_ID,
+            f"✅ Заявка пользователя {user_display} подтверждена",
+            reply_to_message_id=callback.message.message_id
+        )
     else:
         msg = "❌ Ваша заявка *отклонена!*"
         await bot.send_message(user_id, msg, parse_mode="Markdown")
+        await bot.send_message(
+            ADMIN_CHAT_ID,
+            f"❌ Заявка пользователя {user_display} отклонена",
+            reply_to_message_id=callback.message.message_id
+        )
 
     await callback.answer("Готово.")
 
