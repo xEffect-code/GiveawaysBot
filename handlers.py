@@ -99,7 +99,7 @@ async def admin_panel(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")]
     ])
     text = (
-        f"🔧 <b>Админ-панель</b>\n\n"
+        f"👑 <b>Админ-панель</b>\n\n"
         f"💵 Цена билета: <b>{price}</b> руб.\n"
         f"🖼 Фото для оплаты: <code>{photo}</code>"
     )
