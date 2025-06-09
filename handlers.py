@@ -1,20 +1,16 @@
 import json
-import uuid
-from aiogram import Bot, Router, types, F
+from aiogram import Bot, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ContentType, Message
 from aiogram.fsm.context import FSMContext
 from config import ADMIN_CHAT_ID, CHANNEL_ID, ADMIN_ID
 from fsm_states import BuySticker, Application, AdminPanel
 from settings import get_settings, update_settings
-from support_status import is_support_open
 from config import CHANNEL_LINK
 
 router = Router()
 
-ack_messages = {}
-code_to_user = {}
-user_codes = {}  # Новый словарь: code -> [codes]
+pending_requests = {}  # message_id заявки: user_id
 
 def get_users():
     try:
@@ -56,8 +52,6 @@ async def cmd_start(message: types.Message):
         reply_markup=kb
     )
 
-# --- ПРОВЕРКА ПОДПИСКИ ---
-
 @router.callback_query(lambda c: c.data == "check_sub")
 async def check_subscription(callback: CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
@@ -82,180 +76,6 @@ async def check_subscription(callback: CallbackQuery, bot: Bot):
         await callback.message.answer("⚠ Не удалось проверить подписку. Попробуйте позже.")
     await callback.answer()
 
-
-# --- АДМИН-ПАНЕЛЬ ---
-
-@router.message(Command("admin"))
-async def admin_panel(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return await message.answer("❌ Доступ запрещён")
-    settings = get_settings()
-    price = settings.get("price_per_ticket", "не задано")
-    photo = settings.get("payment_image_file_id", "не загружено")
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📌 Изменить цену билета", callback_data="admin_change_price")],
-        [InlineKeyboardButton(text="🖼 Загрузить фото оплаты", callback_data="admin_change_image")],
-        [InlineKeyboardButton(text="📄 Посмотреть текущие настройки", callback_data="admin_view_settings")],
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")]
-    ])
-    text = (
-        f"👑 <b>Админ-панель</b>\n\n"
-        f"💵 Цена билета: <b>{price}</b> руб.\n"
-        f"🖼 Фото для оплаты: <code>{photo}</code>"
-    )
-    await message.answer(text, reply_markup=kb, parse_mode="HTML")
-
-@router.callback_query(lambda c: c.data == "admin_view_settings")
-async def view_settings(callback: CallbackQuery):
-    settings = get_settings()
-    price = settings.get("price_per_ticket", "не задано")
-    photo = settings.get("payment_image_file_id", "не загружено")
-    text = (
-        f"💵 Цена билета: <b>{price}</b> руб.\n"
-        f"🖼 Фото для оплаты: <code>{photo}</code>"
-    )
-    await callback.message.answer(text, parse_mode="HTML")
-    await callback.answer()
-
-@router.callback_query(lambda c: c.data == "admin_change_price")
-async def change_price(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите новую цену билета (например, 1000):")
-    await state.set_state(AdminPanel.waiting_new_price)
-    await callback.answer()
-
-@router.message(AdminPanel.waiting_new_price)
-async def set_price(message: Message, state: FSMContext):
-    text = message.text.strip().replace(',', '.')
-    try:
-        price = float(text)
-    except Exception:
-        return await message.answer("❗ Введите число (например, 950)")
-    update_settings({"price_per_ticket": price})
-    await message.answer(f"✅ Цена обновлена: {price:.2f} руб.")
-    await state.clear()
-
-@router.callback_query(lambda c: c.data == "admin_change_image")
-async def change_image(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Пришлите фото, которое будет отображаться перед оплатой.")
-    await state.set_state(AdminPanel.waiting_new_image)
-    await callback.answer()
-
-@router.message(AdminPanel.waiting_new_image, lambda m: m.photo is not None)
-async def set_image(message: Message, state: FSMContext):
-    file_id = message.photo[-1].file_id
-    update_settings({"payment_image_file_id": file_id})
-    await message.answer("✅ Фото для оплаты обновлено.")
-    await state.clear()
-
-@router.message(AdminPanel.waiting_new_image)
-async def wrong_image(message: Message):
-    await message.answer("❗ Пожалуйста, пришлите изображение.")
-
-# --- РАССЫЛКА ---
-
-@router.callback_query(lambda c: c.data == "admin_broadcast")
-async def admin_broadcast(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer(
-        "✉️ Пришлите текст, фото или видео для рассылки (можно с подписью).\n"
-        "После отправки бот попросит подтвердить рассылку."
-    )
-    await state.set_state(AdminPanel.waiting_broadcast)
-    await callback.answer()
-
-@router.message(AdminPanel.waiting_broadcast, lambda m: m.photo is not None)
-async def receive_broadcast_photo(message: Message, state: FSMContext):
-    await state.update_data(
-        broadcast_type="photo",
-        file_id=message.photo[-1].file_id,
-        caption=message.caption or ""
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_broadcast")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_broadcast")]
-    ])
-    await message.answer_photo(
-        message.photo[-1].file_id,
-        caption=message.caption or "(без подписи)",
-        reply_markup=kb
-    )
-    await state.set_state(AdminPanel.confirm_broadcast)
-
-@router.message(AdminPanel.waiting_broadcast, lambda m: m.video is not None)
-async def receive_broadcast_video(message: Message, state: FSMContext):
-    await state.update_data(
-        broadcast_type="video",
-        file_id=message.video.file_id,
-        caption=message.caption or ""
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_broadcast")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_broadcast")]
-    ])
-    await message.answer_video(
-        message.video.file_id,
-        caption=message.caption or "(без подписи)",
-        reply_markup=kb
-    )
-    await state.set_state(AdminPanel.confirm_broadcast)
-
-@router.message(AdminPanel.waiting_broadcast)
-async def receive_broadcast_text(message: Message, state: FSMContext):
-    await state.update_data(
-        broadcast_type="text",
-        text=message.text
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_broadcast")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_broadcast")]
-    ])
-    await message.answer(
-        f"Текст рассылки:\n\n{message.text}",
-        reply_markup=kb
-    )
-    await state.set_state(AdminPanel.confirm_broadcast)
-
-@router.callback_query(lambda c: c.data == "cancel_broadcast")
-async def cancel_broadcast(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.answer("❌ Рассылка отменена.")
-    await callback.answer()
-
-@router.callback_query(lambda c: c.data == "confirm_broadcast")
-async def confirm_broadcast(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    users = get_users()
-    success = 0
-    failed = 0
-
-    await callback.message.answer("🚀 Рассылка началась...")
-    from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-
-    for user_id in users:
-        try:
-            if data.get("broadcast_type") == "photo":
-                await callback.bot.send_photo(
-                    user_id, data["file_id"], caption=data.get("caption", "")
-                )
-            elif data.get("broadcast_type") == "video":
-                await callback.bot.send_video(
-                    user_id, data["file_id"], caption=data.get("caption", "")
-                )
-            elif data.get("broadcast_type") == "text":
-                await callback.bot.send_message(
-                    user_id, data["text"]
-                )
-            success += 1
-        except (TelegramBadRequest, TelegramForbiddenError):
-            failed += 1
-        except Exception:
-            failed += 1
-
-    await callback.message.answer(f"✅ Рассылка завершена!\n\nУспешно: {success}\nНе отправлено: {failed}")
-    await state.clear()
-    await callback.answer()
-
-# --- КУПИТЬ СТИКЕР/ОФОРМЛЕНИЕ ЗАЯВКИ ---
-
 @router.callback_query(lambda c: c.data == "start_buy")
 async def start_buy_sticker(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -267,7 +87,6 @@ async def start_buy_sticker(callback: CallbackQuery, state: FSMContext):
         "Ждём твой выбор! ⬇️"
     )
     await state.set_state(BuySticker.waiting_qty)
-
 
 @router.message(StateFilter(BuySticker.waiting_qty))
 async def process_qty(message: types.Message, state: FSMContext):
@@ -287,7 +106,7 @@ async def process_qty(message: types.Message, state: FSMContext):
         f"Для покупки {qty} стикеров оплатите сумму {total:.0f} руб. 💸\n\n"
         f"📌 Как оплатить:\n"
         f" 1. Открой приложение своего банка 📱\n"
-        f" 2. Отсканируй QR-код выше\n"
+        f" 2. Отсканируй QR-код ниже\n"
         f" 3. Введи сумму {total:.0f} руб. вручную, если не подставится автоматически\n"
         f" 4. Подтверди перевод ✅\n\n"
         f"🔗 Или воспользуйся ссылкой для оплаты:\n\n"
@@ -300,7 +119,6 @@ async def process_qty(message: types.Message, state: FSMContext):
         "✍️ Пожалуйста, введите ваше ФИО:"
     )
     await state.set_state(Application.waiting_fio)
-
 
 @router.message(StateFilter(Application.waiting_fio))
 async def process_fio(message: types.Message, state: FSMContext):
@@ -337,58 +155,75 @@ async def process_phone(message: types.Message, state: FSMContext):
     )
     await state.set_state(Application.waiting_photo)
 
-@router.message(StateFilter(Application.waiting_photo), lambda m: m.content_type in (ContentType.PHOTO, ContentType.DOCUMENT))
+@router.message(StateFilter(Application.waiting_photo))
 async def process_photo(message: types.Message, state: FSMContext, bot: Bot):
-    file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+    file_id = None
+
+    if message.content_type == ContentType.PHOTO:
+        file_id = message.photo[-1].file_id
+        mime = "image/photo"
+    elif message.content_type == ContentType.DOCUMENT:
+        mime = message.document.mime_type
+        if mime in ("application/pdf", "image/jpeg", "image/png", "image/jpg", "image/webp"):
+            file_id = message.document.file_id
+        else:
+            await message.answer("❗Пожалуйста, отправьте изображение (jpeg, png, webp) или PDF-файл.")
+            return
+    else:
+        await message.answer("❗Пожалуйста, отправьте изображение (фото) или PDF-файл.")
+        return
+
     data = await state.get_data()
     qty = data['qty']
-    codes = [uuid.uuid4().hex[:8].upper() for _ in range(qty)]
-    await state.update_data(codes=codes)
-    code_to_user[codes[0]] = message.from_user.id
-    ack_messages[message.from_user.id] = codes[0]
-    user_codes[codes[0]] = codes  # Сохраняем список кодов для этой заявки
 
-    codes_str = "\n".join(f"`{c}`" for c in codes)
     text = (
-        f"🎟 *Новая заявка*\n\n"
+        f"🆕 <b>Новая заявка</b>\n\n"
         f"👤 {data['fio']}\n"
         f"📱 {data['phone']}\n"
         f"📦 {qty} стикеров\n"
-        f"🆔 Коды:\n{codes_str}\n"
-        f"🖼 Фото чека:"
+        f"🖼 Фото/чек:"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"approve:{codes[0]}"),
-         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{codes[0]}")]
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data="approve"),
+         InlineKeyboardButton(text="❌ Отклонить", callback_data="reject")]
     ])
-    await bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=file_id, caption=text, parse_mode="Markdown", reply_markup=kb)
+
+    sent = None
+    if message.content_type == ContentType.PHOTO or (message.content_type == ContentType.DOCUMENT and mime.startswith("image/")):
+        sent = await bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=file_id, caption=text, parse_mode="HTML", reply_markup=kb)
+    elif message.content_type == ContentType.DOCUMENT and mime == "application/pdf":
+        sent = await bot.send_document(chat_id=ADMIN_CHAT_ID, document=file_id, caption=text, parse_mode="HTML", reply_markup=kb)
+
+    if sent:
+        pending_requests[sent.message_id] = message.from_user.id
+
     await message.answer(
         "✅ Ваша заявка на участие в розыгрыше отправлена!\n"
         "Мы уже проверяем вашу оплату. Если вы всё сделали правильно — билеты скоро будут у вас! 🎟✨\n\n"
         "⏳ В связи с оплатой банкинга и сверкой оплаты подтверждение может занять до 24 часов — пожалуйста, следите за сообщением бота и наберитесь немного терпения.\n\n"
-        "📩 Как только платёж будет проверен, бот автоматически пришлёт вам сгенерированные билеты для участия в розыгрыше! 🎉\n\n"
+        "📩 Как только платёж будет проверен, бот автоматически пришлёт вам информацию для участия в розыгрыше! 🎉\n\n"
         "❗Если у вас возникли трудности или вы не уверены, что всё прошло корректно — пожалуйста, свяжитесь с администратором:\n"
         "@CuttySark_81\n\n"
         "Спасибо, что участвуете! Удачи! 🍀"
     )
     await state.clear()
 
-# --- ОБРАБОТКА ЗАЯВОК (без кнопки "Связь с менеджером", с выдачей всех кодов) ---
-
-@router.callback_query(lambda c: c.data.startswith("approve:") or c.data.startswith("reject:"))
+@router.callback_query(lambda c: c.data in ("approve", "reject"))
 async def handle_decision(callback: CallbackQuery, bot: Bot):
-    action, code = callback.data.split(":")
-    user_id = code_to_user.get(code)
+    user_id = pending_requests.get(callback.message.message_id)
     if not user_id:
         await callback.answer("❗ Пользователь не найден.")
         return
 
     # Получаем username пользователя
-    chat_member = await bot.get_chat_member(user_id=user_id, chat_id=user_id)
-    username = chat_member.user.username
-    if username:
-        user_display = f"@{username}"
-    else:
+    try:
+        chat_member = await bot.get_chat_member(user_id=user_id, chat_id=user_id)
+        username = chat_member.user.username
+        if username:
+            user_display = f"@{username}"
+        else:
+            user_display = f"id{user_id}"
+    except Exception:
         user_display = f"id{user_id}"
 
     # Удаляем кнопки под исходной заявкой
@@ -401,14 +236,12 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
         inline_keyboard=[[InlineKeyboardButton(text="Купить ещё стикеры", callback_data="start_buy")]]
     )
 
-    if action == "approve":
-        codes_list = user_codes.get(code, [code])
-        codes_str = "\n".join(f"#{c}" for c in codes_list)
+    if callback.data == "approve":
         msg = (
             "✅ Вы все сделали правильно, спасибо!\n"
             "Ваша заявка подтверждена ✅\n\n"
-            "🎟️ Вот список ваших купленных стикеров - билетов:\n"
-            f"{codes_str}\n\n"
+            "🎟️ Вы добавлены в список на проведение розыгрыша, свой присвоенный номер билета вы можете найти в таблице👇\n\n"
+            "https://docs.google.com/spreadsheets/d/1PvxOM2ZCqSKT8djc_3xy5RlE0mMIKKSa-7V2ZwuwYSI/edit?usp=drivesdk\n\n"
             "🍀 Желаем удачи в розыгрыше!\n\n"
             "👇 Хотите увеличить шансы?\n"
             "Вы можете приобрести ещё стикеры, гоу 👇"
@@ -435,19 +268,13 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
 
     await callback.answer("Готово.")
 
-
-
-
 # ---------------------------
 # БЛОКИРОВКА ЛЮБЫХ ЛИЧНЫХ СООБЩЕНИЙ ВНЕ СЦЕНАРИЯ (СТРОГО В КОНЦЕ ФАЙЛА)
 # ---------------------------
 @router.message(StateFilter(None))
 async def block_any_message(message: types.Message, state: FSMContext):
-    # Разрешаем команды (не блокируем сообщения, которые начинаются с '/')
     if message.text and message.text.startswith('/'):
         return
-    # Разрешаем администратору любые сообщения
     if message.from_user.id == ADMIN_ID:
         return
-    # Всё остальное блокируем
     pass
