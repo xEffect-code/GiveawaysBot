@@ -1,0 +1,111 @@
+{
+  "active": false,
+  "threshold": 3,
+  "last_ticket": 2,
+  "users": {
+    "5201296217": {
+      "referrer": 8069401781,
+      "counted": true
+    },
+    "8012680946": {
+      "referrer": 8069401781,
+      "counted": true
+    },
+    "6991971555": {
+      "referrer": 8069401781,
+      "counted": true
+    },
+    "6799373019": {
+      "referrer": 1463358618,
+      "counted": true
+    },
+    "7079529731": {
+      "referrer": 1463358618,
+      "counted": true
+    },
+    "6970014315": {
+      "referrer": 1463358618,
+      "counted": true
+    }
+  },
+  "referrers": {
+    "8069401781": {
+      "referred": [
+        5201296217,
+        8012680946,
+        6991971555
+      ],
+      "tickets": []
+    },
+    "1463358618": {
+      "referred": [
+        6799373019,
+        7079529731,
+        6970014315
+      ],
+      "tickets": [
+        2
+      ]
+    }
+  },
+  "history": [
+    {
+      "action": "paused",
+      "time": "2025-07-27T15:45:30.356892",
+      "participants": 0,
+      "tickets": 0
+    },
+    {
+      "action": "started",
+      "time": "2025-07-27T15:45:41.364216"
+    },
+    {
+      "action": "paused",
+      "time": "2025-07-27T16:04:35.250358",
+      "participants": 3,
+      "tickets": 1
+    },
+    {
+      "action": "started",
+      "time": "2025-07-27T16:04:41.909956"
+    },
+    {
+      "action": "paused",
+      "time": "2025-07-27T16:12:06.184368",
+      "participants": 3,
+      "tickets": 0
+    },
+    {
+      "action": "paused",
+      "time": "2025-07-27T16:12:08.265411",
+      "participants": 3,
+      "tickets": 0
+    },
+    {
+      "action": "paused",
+      "time": "2025-07-27T16:12:12.818879",
+      "participants": 3,
+      "tickets": 0
+    },
+    {
+      "action": "started",
+      "time": "2025-07-27T16:12:16.649187"
+    },
+    {
+      "action": "paused",
+      "time": "2025-07-27T16:57:35.550672",
+      "participants": 3,
+      "tickets": 0
+    },
+    {
+      "action": "started",
+      "time": "2025-07-27T17:07:24.751026"
+    },
+    {
+      "action": "paused",
+      "time": "2025-07-27T17:10:59.823870",
+      "participants": 6,
+      "tickets": 1
+    }
+  ]
+}

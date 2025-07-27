@@ -5,6 +5,10 @@ from aiogram.fsm.context import FSMContext
 from fsm_states import AdminPanel
 from config import ADMIN_ID
 from settings import get_settings, update_settings
+import referrals
+from datetime import datetime
+import random
+import string
 
 import json
 
@@ -29,7 +33,10 @@ async def admin_panel(message: Message):
         [InlineKeyboardButton(text="📌 Изменить цену билета", callback_data="admin_change_price")],
         [InlineKeyboardButton(text="🖼 Загрузить фото оплаты", callback_data="admin_change_image")],
         [InlineKeyboardButton(text="📄 Посмотреть текущие настройки", callback_data="admin_view_settings")],
-        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")]
+        [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="📈 Реферальная статистика", callback_data="admin_ref_stats")],
+        [InlineKeyboardButton(text="⏸️ Приостановить реферальный розыгрыш", callback_data="admin_pause_ref")],
+        [InlineKeyboardButton(text="▶️ Запустить новый реферальный розыгрыш", callback_data="admin_start_ref")]
     ])
     text = (
         f"🔧 <b>Админ-панель</b>\n\n"
@@ -187,3 +194,81 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(f"✅ Рассылка завершена!\n\nУспешно: {success}\nНе отправлено: {failed}")
     await state.clear()
     await callback.answer()
+
+@router.callback_query(F.data == "admin_ref_stats")
+async def admin_ref_stats(callback: CallbackQuery):
+    data = referrals.load_data()
+    lines = []
+    for ref_id, info in data["referrers"].items():
+        lines.append(f"👤 {ref_id}: {len(info['referred'])} приг., {len(info['tickets'])} билетов")
+    text = "📊 <b>Все реф. аккаунты</b>\n\n" + "\n".join(lines)
+    await callback.message.answer(text, parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_pause_ref")
+async def admin_pause_ref(callback: CallbackQuery):
+    data = referrals.load_data()
+
+    # считаем общее количество приглашённых и выданных билетов
+    total_part = sum(len(v["referred"]) for v in data["referrers"].values())
+    total_tix  = sum(len(v["tickets"])  for v in data["referrers"].values())
+
+    # приостанавливаем розыгрыш и сохраняем в историю
+    data["active"] = False
+    data["history"].append({
+        "action": "paused",
+        "time": datetime.utcnow().isoformat(),
+        "participants": total_part,
+        "tickets": total_tix
+    })
+    referrals.save_data(data)
+
+    # готовим список участников с «шестизначными» кодами
+    lines = []
+    for ref_id, info in data["referrers"].items():
+        if not info["tickets"]:
+            continue
+        # получаем имя/username
+        try:
+            member = await callback.bot.get_chat_member(chat_id=int(ref_id), user_id=int(ref_id))
+            username = f"@{member.user.username}" if member.user.username else member.user.full_name
+        except:
+            username = f"id{ref_id}"
+        # генерируем по коду на каждый билет
+        codes = [
+            "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            for _ in info["tickets"]
+        ]
+        lines.append(f"{username}: {', '.join(codes)}")
+
+    detail_text = "\n".join(lines) or "— нет выданных билетов —"
+
+    # отправляем результат админу
+    await callback.message.answer(
+        (
+            f"⏸️ <b>Реферальный розыгрыш приостановлен</b>\n\n"
+            f"👥 Всего приглашено: <b>{total_part}</b>\n"
+            f"🎫 Выдано билетов: <b>{total_tix}</b>\n\n"
+            f"<b>Участники и их коды:</b>\n"
+            f"{detail_text}"
+        ),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_start_ref")
+async def admin_start_ref(callback: CallbackQuery):
+    data = referrals.load_data()
+    data["active"] = True
+    # чистим только выданные билеты, но сохраняем списки рефералов
+    for info in data["referrers"].values():
+        info["tickets"] = []
+    data["history"].append({
+        "action": "started",
+        "time": datetime.utcnow().isoformat()
+    })
+    referrals.save_data(data)
+    await callback.message.answer("▶️ Новый реферальный розыгрыш запущен. Счетчики билетов сброшены.")
+    await callback.answer()
+

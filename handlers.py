@@ -1,12 +1,12 @@
 import json
 from aiogram import Bot, Router, types
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ContentType, Message
 from aiogram.fsm.context import FSMContext
-from config import ADMIN_CHAT_ID, CHANNEL_ID, ADMIN_ID
+from config import ADMIN_CHAT_ID, CHANNEL_ID, ADMIN_ID, CHANNEL_LINK
 from fsm_states import BuySticker, Application, AdminPanel
 from settings import get_settings, update_settings
-from config import CHANNEL_LINK
+import referrals
 
 router = Router()
 
@@ -15,22 +15,44 @@ pending_requests = {}  # message_id заявки: user_id
 def get_users():
     try:
         with open("users.json", "r", encoding="utf-8") as f:
-            users = json.load(f)
-        return users
+            return json.load(f)
     except Exception:
         return []
 
-@router.message(Command("start"))
-async def cmd_start(message: types.Message):
-    user_id = message.from_user.id
+@router.message(CommandStart())
+async def cmd_start(message: Message, command):
+    # 1) Реферальная логика
+    args = command.args or ""
+    if referrals.is_active() and args.startswith("ref_"):
+        try:
+            referrer_id = int(args.split("_", 1)[1])
+        except ValueError:
+            referrer_id = None
+        if referrer_id and referrer_id != message.from_user.id:
+            data = referrals.load_data()
+            user_key = str(message.from_user.id)
+            if not data["users"].get(user_key, {}).get("counted", False):
+                data["users"][user_key] = {"referrer": referrer_id, "counted": True}
+                ref_data = data["referrers"].setdefault(str(referrer_id), {"referred": [], "tickets": []})
+                ref_data["referred"].append(message.from_user.id)
+                threshold = data["threshold"]
+                if len(ref_data["referred"]) >= threshold:
+                    data["last_ticket"] += 1
+                    ticket_no = data["last_ticket"]
+                    ref_data["tickets"].append(ticket_no)
+                    await message.bot.send_message(
+                        referrer_id,
+                        f"🎁 Поздравляем! Вы набрали {threshold} рефералов и получили бесплатный билет №{ticket_no}!"
+                    )
+                referrals.save_data(data)
 
-    # --- Добавляем пользователя в users.json, если его там ещё нет
+    # 2) Оригинальный start — регистрация и приветствие
+    user_id = message.from_user.id
     try:
         with open("users.json", "r", encoding="utf-8") as f:
             users = json.load(f)
     except Exception:
         users = []
-
     if user_id not in users:
         users.append(user_id)
         with open("users.json", "w", encoding="utf-8") as f:
@@ -38,7 +60,7 @@ async def cmd_start(message: types.Message):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Подписаться на канал", url=CHANNEL_LINK)],
-        [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
+        [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")],
     ])
     await message.answer(
         "🎉 Привет друг! \n"
@@ -59,7 +81,8 @@ async def check_subscription(callback: CallbackQuery, bot: Bot):
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         if member.status in ("member", "creator", "administrator"):
             kb_buy = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Купить стикер", callback_data="start_buy")]
+                [InlineKeyboardButton(text="Купить стикер", callback_data="start_buy")],
+                [InlineKeyboardButton(text="📣 Реферальная система", callback_data="referral_info")],
             ])
             await callback.message.answer(
                 "✅ Подписка успешно подтверждена! Спасибо, что с нами! 🤗 Теперь ты можешь принять участие в розыгрыше и выиграть крутые призы! 🎁✨\n\n"
@@ -76,6 +99,7 @@ async def check_subscription(callback: CallbackQuery, bot: Bot):
         await callback.message.answer("⚠ Не удалось проверить подписку. Попробуйте позже.")
     await callback.answer()
 
+
 @router.callback_query(lambda c: c.data == "start_buy")
 async def start_buy_sticker(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -89,7 +113,7 @@ async def start_buy_sticker(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BuySticker.waiting_qty)
 
 @router.message(StateFilter(BuySticker.waiting_qty))
-async def process_qty(message: types.Message, state: FSMContext):
+async def process_qty(message: Message, state: FSMContext):
     text = message.text.strip()
     if not text.isdigit() or int(text) <= 0:
         await message.answer("❗ Введите корректное число.")
@@ -98,7 +122,7 @@ async def process_qty(message: types.Message, state: FSMContext):
     await state.update_data(qty=qty)
     settings = get_settings()
     total = qty * settings["price_per_ticket"]
-    if settings["payment_image_file_id"]:
+    if settings.get("payment_image_file_id"):
         await message.answer_photo(settings["payment_image_file_id"])
     await message.answer(
         f"💳 Оплата стикеров для участия в розыгрыше\n\n"
@@ -121,7 +145,7 @@ async def process_qty(message: types.Message, state: FSMContext):
     await state.set_state(Application.waiting_fio)
 
 @router.message(StateFilter(Application.waiting_fio))
-async def process_fio(message: types.Message, state: FSMContext):
+async def process_fio(message: Message, state: FSMContext):
     if not message.text:
         await message.answer("❗ Пожалуйста, отправьте ваше ФИО текстом.")
         return
@@ -138,7 +162,7 @@ async def process_fio(message: types.Message, state: FSMContext):
     await state.set_state(Application.waiting_phone)
 
 @router.message(StateFilter(Application.waiting_phone))
-async def process_phone(message: types.Message, state: FSMContext):
+async def process_phone(message: Message, state: FSMContext):
     if not message.text:
         await message.answer("❗ Пожалуйста, отправьте номер телефона текстом.")
         return
@@ -156,9 +180,8 @@ async def process_phone(message: types.Message, state: FSMContext):
     await state.set_state(Application.waiting_photo)
 
 @router.message(StateFilter(Application.waiting_photo))
-async def process_photo(message: types.Message, state: FSMContext, bot: Bot):
+async def process_photo(message: Message, state: FSMContext, bot: Bot):
     file_id = None
-
     if message.content_type == ContentType.PHOTO:
         file_id = message.photo[-1].file_id
         mime = "image/photo"
@@ -172,14 +195,12 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot):
     else:
         await message.answer("❗Пожалуйста, отправьте изображение (фото) или PDF-файл.")
         return
-
     data = await state.get_data()
-    qty = data['qty']
-
+    qty = data.get('qty')
     text = (
         f"🆕 <b>Новая заявка</b>\n\n"
-        f"👤 {data['fio']}\n"
-        f"📱 {data['phone']}\n"
+        f"👤 {data.get('fio')}\n"
+        f"📱 {data.get('phone')}\n"
         f"📦 {qty} стикеров\n"
         f"🖼 Фото/чек:"
     )
@@ -187,26 +208,42 @@ async def process_photo(message: types.Message, state: FSMContext, bot: Bot):
         [InlineKeyboardButton(text="✅ Подтвердить", callback_data="approve"),
          InlineKeyboardButton(text="❌ Отклонить", callback_data="reject")]
     ])
-
     sent = None
-    if message.content_type == ContentType.PHOTO or (message.content_type == ContentType.DOCUMENT and mime.startswith("image/")):
+    if file_id and (message.content_type == ContentType.PHOTO or (message.content_type == ContentType.DOCUMENT and mime.startswith("image/"))):
         sent = await bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=file_id, caption=text, parse_mode="HTML", reply_markup=kb)
-    elif message.content_type == ContentType.DOCUMENT and mime == "application/pdf":
+    elif file_id and message.content_type == ContentType.DOCUMENT and mime == "application/pdf":
         sent = await bot.send_document(chat_id=ADMIN_CHAT_ID, document=file_id, caption=text, parse_mode="HTML", reply_markup=kb)
-
     if sent:
         pending_requests[sent.message_id] = message.from_user.id
-
     await message.answer(
         "✅ Ваша заявка на участие в розыгрыше отправлена!\n"
         "Мы уже проверяем вашу оплату. Если вы всё сделали правильно — билеты скоро будут у вас! 🎟✨\n\n"
         "⏳ В связи с оплатой банкинга и сверкой оплаты подтверждение может занять до 24 часов — пожалуйста, следите за сообщением бота и наберитесь немного терпения.\n\n"
         "📩 Как только платёж будет проверен, бот автоматически пришлёт вам информацию для участия в розыгрыше! 🎉\n\n"
         "❗Если у вас возникли трудности или вы не уверены, что всё прошло корректно — пожалуйста, свяжитесь с администратором:\n"
-        "@CuttySark_81\n\n"
-        "Спасибо, что участвуете! Удачи! 🍀"
+       "@CuttySark_81"
     )
     await state.clear()
+
+@router.callback_query(lambda c: c.data == "referral_info")
+async def referral_info(callback: CallbackQuery):
+    user_key = str(callback.from_user.id)
+    data = referrals.load_data()
+    ref_data = data.get("referrers", {}).get(user_key, {"referred": [], "tickets": []})
+    referred = ref_data.get("referred", [])
+    tickets = ref_data.get("tickets", [])
+    me = await callback.bot.get_me()
+    link = f"https://t.me/{me.username}?start=ref_{callback.from_user.id}"
+    text = (
+        f"📊 <b>Ваша реферальная статистика</b>\n\n"
+        f"👥 Приглашено: <b>{len(referred)}</b>\n"
+        f"🎫 Получено бесплатных билетов: <b>{len(tickets)}</b>\n"
+    )
+    if tickets:
+        text += "Номера билетов: " + ", ".join(str(n) for n in tickets) + "\n\n"
+    text += f"🔗 Ваша ссылка: {link}"
+    await callback.message.answer(text, parse_mode="HTML")
+    await callback.answer()
 
 @router.callback_query(lambda c: c.data in ("approve", "reject"))
 async def handle_decision(callback: CallbackQuery, bot: Bot):
@@ -215,18 +252,13 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
         await callback.answer("❗ Пользователь не найден.")
         return
 
-    # Получаем username пользователя
     try:
         chat_member = await bot.get_chat_member(user_id=user_id, chat_id=user_id)
         username = chat_member.user.username
-        if username:
-            user_display = f"@{username}"
-        else:
-            user_display = f"id{user_id}"
+        user_display = f"@{username}" if username else f"id{user_id}"
     except Exception:
         user_display = f"id{user_id}"
 
-    # Удаляем кнопки под исходной заявкой
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
@@ -246,7 +278,7 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
             "👇 Хотите увеличить шансы?\n"
             "Вы можете приобрести ещё стикеры, гоу 👇"
         )
-        await bot.send_message(user_id, msg, reply_markup=buy_more_kb)
+        await bot.send_message(user_id, msg,	reply_markup=buy_more_kb)
         await bot.send_message(
             ADMIN_CHAT_ID,
             f"✅ Заявка пользователя {user_display} подтверждена",
