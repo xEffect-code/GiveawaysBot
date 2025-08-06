@@ -4,13 +4,14 @@ from aiogram.filters import CommandStart, StateFilter
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ContentType, Message
 from aiogram.fsm.context import FSMContext
 from config import ADMIN_CHAT_ID, CHANNEL_ID, ADMIN_ID, CHANNEL_LINK
-from fsm_states import BuySticker, Application, AdminPanel
-from settings import get_settings, update_settings
+from fsm_states import BuySticker, Application
+from settings import get_settings
 import referrals
 
 router = Router()
 
 pending_requests = {}  # message_id заявки: user_id
+
 
 def get_users():
     try:
@@ -21,32 +22,22 @@ def get_users():
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, command):
-    # 1) Реферальная логика
+    # Реферальная логика: сохраняем связь при /start, учет после подписки
     args = command.args or ""
     if referrals.is_active() and args.startswith("ref_"):
         try:
             referrer_id = int(args.split("_", 1)[1])
         except ValueError:
             referrer_id = None
+        user_key = str(message.from_user.id)
+        data = referrals.load_data()
         if referrer_id and referrer_id != message.from_user.id:
-            data = referrals.load_data()
-            user_key = str(message.from_user.id)
-            if not data["users"].get(user_key, {}).get("counted", False):
-                data["users"][user_key] = {"referrer": referrer_id, "counted": True}
-                ref_data = data["referrers"].setdefault(str(referrer_id), {"referred": [], "tickets": []})
-                ref_data["referred"].append(message.from_user.id)
-                threshold = data["threshold"]
-                if len(ref_data["referred"]) >= threshold:
-                    data["last_ticket"] += 1
-                    ticket_no = data["last_ticket"]
-                    ref_data["tickets"].append(ticket_no)
-                    await message.bot.send_message(
-                        referrer_id,
-                        f"🎁 Поздравляем! Вы набрали {threshold} рефералов и получили бесплатный билет №{ticket_no}!"
-                    )
+            # записываем, если еще не было
+            if user_key not in data["users"]:
+                data["users"][user_key] = {"referrer": referrer_id, "counted": False}
                 referrals.save_data(data)
 
-    # 2) Оригинальный start — регистрация и приветствие
+    # Основной start — регистрация и приветствие
     user_id = message.from_user.id
     try:
         with open("users.json", "r", encoding="utf-8") as f:
@@ -80,6 +71,33 @@ async def check_subscription(callback: CallbackQuery, bot: Bot):
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         if member.status in ("member", "creator", "administrator"):
+            # Учет реферала после подтверждения подписки
+            user_key = str(user_id)
+            data = referrals.load_data()
+            user_data = data["users"].get(user_key)
+            if user_data and not user_data.get("counted", False):
+                referrer_id = user_data["referrer"]
+                ref_key = str(referrer_id)
+                ref_data = data["referrers"].setdefault(ref_key, {"referred": [], "tickets": []})
+                ref_data["referred"].append(user_id)
+                data["users"][user_key]["counted"] = True
+                # Генерация билета по кратным порогам
+                threshold = data.get("threshold", 3)
+                count = len(ref_data["referred"])
+                if threshold > 0 and count % threshold == 0:
+                    data["last_ticket"] = data.get("last_ticket", 0) + 1
+                    ticket_no = data["last_ticket"]
+                    ref_data["tickets"].append(ticket_no)
+                    # уведомляем реферера
+                    try:
+                        await bot.send_message(
+                            referrer_id,
+                            f"🎁 Поздравляем! Вы набрали {threshold} рефералов и получили бесплатный билет №{ticket_no}!"
+                        )
+                    except Exception:
+                        pass
+                referrals.save_data(data)
+
             kb_buy = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="Купить стикер", callback_data="start_buy")],
                 [InlineKeyboardButton(text="📣 Реферальная система", callback_data="referral_info")],
@@ -98,7 +116,6 @@ async def check_subscription(callback: CallbackQuery, bot: Bot):
     except Exception:
         await callback.message.answer("⚠ Не удалось проверить подписку. Попробуйте позже.")
     await callback.answer()
-
 
 @router.callback_query(lambda c: c.data == "start_buy")
 async def start_buy_sticker(callback: CallbackQuery, state: FSMContext):

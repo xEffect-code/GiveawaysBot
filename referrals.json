@@ -1,7 +1,7 @@
 {
   "active": false,
   "threshold": 3,
-  "last_ticket": 2,
+  "last_ticket": 3,
   "users": {
     "5201296217": {
       "referrer": 8069401781,
@@ -26,6 +26,22 @@
     "6970014315": {
       "referrer": 1463358618,
       "counted": true
+    },
+    "7603979266": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "5624814266": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "1707770458": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "921129237": {
+      "referrer": 7883064372,
+      "counted": true
     }
   },
   "referrers": {
@@ -43,8 +59,17 @@
         7079529731,
         6970014315
       ],
+      "tickets": []
+    },
+    "7883064372": {
+      "referred": [
+        7603979266,
+        1707770458,
+        5624814266,
+        921129237
+      ],
       "tickets": [
-        2
+        3
       ]
     }
   },
@@ -105,6 +130,22 @@
       "action": "paused",
       "time": "2025-07-27T17:10:59.823870",
       "participants": 6,
+      "tickets": 1
+    },
+    {
+      "action": "paused",
+      "time": "2025-08-06T18:07:10.405168",
+      "participants": 6,
+      "tickets": 1
+    },
+    {
+      "action": "started",
+      "time": "2025-08-06T18:07:14.816102"
+    },
+    {
+      "action": "paused",
+      "time": "2025-08-06T18:25:45.410007",
+      "participants": 10,
       "tickets": 1
     }
   ]
