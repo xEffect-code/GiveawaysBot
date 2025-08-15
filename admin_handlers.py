@@ -1,18 +1,16 @@
+import json
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from fsm_states import AdminPanel
 from config import ADMIN_ID
 from settings import get_settings, update_settings
 import referrals
-from datetime import datetime
-import random
-import string
-
-import json
 
 router = Router()
+
 
 def get_users():
     try:
@@ -21,6 +19,7 @@ def get_users():
         return users
     except Exception:
         return []
+
 
 @router.message(Command("admin"))
 async def admin_panel(message: Message):
@@ -45,6 +44,7 @@ async def admin_panel(message: Message):
     )
     await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
+
 @router.callback_query(F.data == "admin_view_settings")
 async def view_settings(callback: CallbackQuery):
     settings = get_settings()
@@ -57,11 +57,13 @@ async def view_settings(callback: CallbackQuery):
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
 
+
 @router.callback_query(F.data == "admin_change_price")
 async def change_price(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Введите новую цену билета (например, 1000):")
     await state.set_state(AdminPanel.waiting_new_price)
     await callback.answer()
+
 
 @router.message(AdminPanel.waiting_new_price)
 async def set_price(message: Message, state: FSMContext):
@@ -74,11 +76,13 @@ async def set_price(message: Message, state: FSMContext):
     await message.answer(f"✅ Цена обновлена: {price:.2f} руб.")
     await state.clear()
 
+
 @router.callback_query(F.data == "admin_change_image")
 async def change_image(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Пришлите фото, которое будет отображаться перед оплатой.")
     await state.set_state(AdminPanel.waiting_new_image)
     await callback.answer()
+
 
 @router.message(AdminPanel.waiting_new_image, F.photo)
 async def set_image(message: Message, state: FSMContext):
@@ -87,9 +91,11 @@ async def set_image(message: Message, state: FSMContext):
     await message.answer("✅ Фото для оплаты обновлено.")
     await state.clear()
 
+
 @router.message(AdminPanel.waiting_new_image)
 async def wrong_image(message: Message):
     await message.answer("❗ Пожалуйста, пришлите изображение.")
+
 
 # --- РАССЫЛКА ---
 
@@ -102,9 +108,9 @@ async def admin_broadcast(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminPanel.waiting_broadcast)
     await callback.answer()
 
+
 @router.message(AdminPanel.waiting_broadcast, F.photo)
 async def receive_broadcast_photo(message: Message, state: FSMContext):
-    # Сохраняем file_id и подпись
     await state.update_data(
         broadcast_type="photo",
         file_id=message.photo[-1].file_id,
@@ -120,6 +126,7 @@ async def receive_broadcast_photo(message: Message, state: FSMContext):
         reply_markup=kb
     )
     await state.set_state(AdminPanel.confirm_broadcast)
+
 
 @router.message(AdminPanel.waiting_broadcast, F.video)
 async def receive_broadcast_video(message: Message, state: FSMContext):
@@ -139,6 +146,7 @@ async def receive_broadcast_video(message: Message, state: FSMContext):
     )
     await state.set_state(AdminPanel.confirm_broadcast)
 
+
 @router.message(AdminPanel.waiting_broadcast)
 async def receive_broadcast_text(message: Message, state: FSMContext):
     await state.update_data(
@@ -155,11 +163,13 @@ async def receive_broadcast_text(message: Message, state: FSMContext):
     )
     await state.set_state(AdminPanel.confirm_broadcast)
 
+
 @router.callback_query(F.data == "cancel_broadcast")
 async def cancel_broadcast(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.answer("❌ Рассылка отменена.")
     await callback.answer()
+
 
 @router.callback_query(F.data == "confirm_broadcast")
 async def confirm_broadcast(callback: CallbackQuery, state: FSMContext):
@@ -174,17 +184,11 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext):
     for user_id in users:
         try:
             if data.get("broadcast_type") == "photo":
-                await callback.bot.send_photo(
-                    user_id, data["file_id"], caption=data.get("caption", "")
-                )
+                await callback.bot.send_photo(user_id, data["file_id"], caption=data.get("caption", ""))
             elif data.get("broadcast_type") == "video":
-                await callback.bot.send_video(
-                    user_id, data["file_id"], caption=data.get("caption", "")
-                )
-            elif data.get("broadcast_type") == "text":
-                await callback.bot.send_message(
-                    user_id, data["text"]
-                )
+                await callback.bot.send_video(user_id, data["file_id"], caption=data.get("caption", ""))
+            else:
+                await callback.bot.send_message(user_id, data.get("text", ""))
             success += 1
         except (TelegramBadRequest, TelegramForbiddenError):
             failed += 1
@@ -195,59 +199,65 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
 
+
 @router.callback_query(F.data == "admin_ref_stats")
 async def admin_ref_stats(callback: CallbackQuery):
     data = referrals.load_data()
     lines = []
     for ref_id, info in data["referrers"].items():
-        lines.append(f"👤 {ref_id}: {len(info['referred'])} приг., {len(info['tickets'])} билетов")
-    text = "📊 <b>Все реф. аккаунты</b>\n\n" + "\n".join(lines)
+        try:
+            chat = await callback.bot.get_chat(int(ref_id))
+            username = f"@{chat.username}" if chat.username else (chat.full_name or f"id{ref_id}")
+        except Exception:
+            username = f"id{ref_id}"
+
+        round_count = int(info.get("round_count", 0))
+        tickets = [str(x) for x in info.get("tickets", [])]
+        codes_str = ", ".join(tickets) if tickets else "—"
+        lines.append(f"👤 {username}: {round_count} приг., билеты: {codes_str}")
+
+    text = "📊 <b>Все реф. аккаунты</b>\n\n" + ("\n".join(lines) if lines else "— пока пусто —")
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
+
 
 @router.callback_query(F.data == "admin_pause_ref")
 async def admin_pause_ref(callback: CallbackQuery):
     data = referrals.load_data()
 
-    # считаем общее количество приглашённых и выданных билетов
-    total_part = sum(len(v["referred"]) for v in data["referrers"].values())
-    total_tix  = sum(len(v["tickets"])  for v in data["referrers"].values())
+    total_part = sum(int(v.get("round_count", 0)) for v in data["referrers"].values())
+    total_tix = sum(len(v.get("tickets", [])) for v in data["referrers"].values())
 
-    # приостанавливаем розыгрыш и сохраняем в историю
     data["active"] = False
     data["history"].append({
         "action": "paused",
+        "round": data.get("current_round", 1),
         "time": datetime.utcnow().isoformat(),
         "participants": total_part,
         "tickets": total_tix
     })
     referrals.save_data(data)
 
-    # готовим список участников с «шестизначными» кодами
+    # Сводка по кодам текущего розыгрыша
     lines = []
     for ref_id, info in data["referrers"].items():
-        if not info["tickets"]:
+        if not info.get("tickets"):
             continue
-        # получаем имя/username
         try:
-            member = await callback.bot.get_chat_member(chat_id=int(ref_id), user_id=int(ref_id))
-            username = f"@{member.user.username}" if member.user.username else member.user.full_name
-        except:
+            chat = await callback.bot.get_chat(int(ref_id))
+            username = f"@{chat.username}" if chat.username else (chat.full_name or f"id{ref_id}")
+        except Exception:
             username = f"id{ref_id}"
-        # генерируем по коду на каждый билет
-        codes = [
-            "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-            for _ in info["tickets"]
-        ]
+        codes = [str(x) for x in info.get("tickets", [])]
         lines.append(f"{username}: {', '.join(codes)}")
 
     detail_text = "\n".join(lines) or "— нет выданных билетов —"
 
-    # отправляем результат админу
     await callback.message.answer(
         (
-            f"⏸️ <b>Реферальный розыгрыш приостановлен</b>\n\n"
-            f"👥 Всего приглашено: <b>{total_part}</b>\n"
+            "⏸️ <b>Реферальный розыгрыш приостановлен</b>\n\n"
+            f"📊 Текущий раунд: <b>{data.get('current_round', 1)}</b>\n"
+            f"👥 Всего приглашено (в раунде): <b>{total_part}</b>\n"
             f"🎫 Выдано билетов: <b>{total_tix}</b>\n\n"
             f"<b>Участники и их коды:</b>\n"
             f"{detail_text}"
@@ -261,14 +271,17 @@ async def admin_pause_ref(callback: CallbackQuery):
 async def admin_start_ref(callback: CallbackQuery):
     data = referrals.load_data()
     data["active"] = True
-    # чистим только выданные билеты, но сохраняем списки рефералов
+    data["current_round"] = int(data.get("current_round", 1)) + 1
+
     for info in data["referrers"].values():
         info["tickets"] = []
+        info["round_count"] = 0
+
     data["history"].append({
         "action": "started",
+        "round": data["current_round"],
         "time": datetime.utcnow().isoformat()
     })
     referrals.save_data(data)
-    await callback.message.answer("▶️ Новый реферальный розыгрыш запущен. Счетчики билетов сброшены.")
+    await callback.message.answer("▶️ Новый реферальный розыгрыш запущен. Счётчики раунда обнулены.")
     await callback.answer()
-

@@ -1,48 +1,61 @@
 import json
+import random
+import string
 from pathlib import Path
-from datetime import datetime
 
 PATH = Path("referrals.json")
 
-# Структура JSON:
-# {
-#   "active": true,
-#   "threshold": 3,
-#   "last_ticket": 0,
-#   "users": { "<user_id>": { "referrer": <referrer_id>, "counted": true } },
-#   "referrers": {
-#       "<referrer_id>": {
-#           "referred": [<user_id>, ...],
-#           "tickets": [<ticket_number>, ...]
-#       }
-#   },
-#   "history": [
-#     { "action": "paused", "time": "2025-07-27T12:00:00", "participants": 42, "tickets": 14 },
-#     { "action": "started", "time": "2025-07-28T09:00:00" }
-#   ]
-# }
 
 def load_data():
     if PATH.exists():
-        return json.loads(PATH.read_text(encoding="utf-8"))
-    # дефолтная структура
-    return {
-        "active": True,
-        "threshold": 3,
-        "last_ticket": 0,
-        "users": {},
-        "referrers": {},
-        "history": []
-    }
+        data = json.loads(PATH.read_text(encoding="utf-8"))
+    else:
+        data = {
+            "active": True,
+            "threshold": 3,          # порог приглашений для 1 билета
+            "current_round": 1,      # номер текущего розыгрыша
+            "users": {},             # "<user_id>": {"referrer": id, "counted": bool}
+            "referrers": {},         # "<referrer_id>": {"referred": [...], "tickets": [...], "round_count": 0}
+            "history": []
+        }
+
+    # Нормализация и обратная совместимость
+    if "current_round" not in data:
+        data["current_round"] = 1
+    if "referrers" not in data:
+        data["referrers"] = {}
+
+    for ref_id, info in data["referrers"].items():
+        # tickets всегда как строки
+        info["tickets"] = [str(x) for x in info.get("tickets", [])]
+        # счётчик текущего розыгрыша
+        if "round_count" not in info:
+            # Инициализируем нулём, чтобы старые приглашения не влияли на новый раунд
+            info["round_count"] = 0
+
+    return data
+
 
 def save_data(data):
     PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def is_active():
-    return load_data()["active"]
 
-def record_start(user_id):
-    data = load_data()
-    # попадаем сюда при /start?start=ref_<referrer>
-    args = user_id  # в вызывающем коде передаём actual_arg
-    # (ниже детали реализации в handlers.py)
+def is_active():
+    return load_data().get("active", False)
+
+
+def _existing_codes(data):
+    codes = set()
+    for info in data.get("referrers", {}).values():
+        for c in info.get("tickets", []):
+            codes.add(str(c))
+    return codes
+
+
+def generate_unique_code(data):
+    """6-значный уникальный код из цифр."""
+    used = _existing_codes(data)
+    while True:
+        code = "".join(random.choices(string.digits, k=6))
+        if code not in used:
+            return code

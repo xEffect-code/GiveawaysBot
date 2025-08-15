@@ -1,5 +1,5 @@
 {
-  "active": false,
+  "active": true,
   "threshold": 3,
   "last_ticket": 3,
   "users": {
@@ -42,6 +42,74 @@
     "921129237": {
       "referrer": 7883064372,
       "counted": true
+    },
+    "7361913434": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "7958031888": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "6154598835": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "7146021623": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "1031857933": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "8165875988": {
+      "referrer": 7883064372,
+      "counted": false
+    },
+    "7226015829": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "6429298652": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "6730818540": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "6332718021": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "7600053058": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "7481011097": {
+      "referrer": 7883064372,
+      "counted": true
+    },
+    "5812398565": {
+      "referrer": 7883064372,
+      "counted": false
+    },
+    "979405333": {
+      "referrer": 8116023500,
+      "counted": true
+    },
+    "1449637673": {
+      "referrer": 8116023500,
+      "counted": true
+    },
+    "7742640863": {
+      "referrer": 8116023500,
+      "counted": true
+    },
+    "7569797563": {
+      "referrer": 6677495686,
+      "counted": true
     }
   },
   "referrers": {
@@ -51,7 +119,8 @@
         8012680946,
         6991971555
       ],
-      "tickets": []
+      "tickets": [],
+      "round_count": 0
     },
     "1463358618": {
       "referred": [
@@ -59,18 +128,47 @@
         7079529731,
         6970014315
       ],
-      "tickets": []
+      "tickets": [],
+      "round_count": 0
     },
     "7883064372": {
       "referred": [
         7603979266,
         1707770458,
         5624814266,
-        921129237
+        921129237,
+        7361913434,
+        7958031888,
+        6154598835,
+        7146021623,
+        1031857933,
+        7226015829,
+        6429298652,
+        6730818540,
+        6332718021,
+        7600053058,
+        7481011097
+      ],
+      "tickets": [],
+      "round_count": 0
+    },
+    "8116023500": {
+      "referred": [
+        1449637673,
+        979405333,
+        7742640863
       ],
       "tickets": [
-        3
-      ]
+        "687017"
+      ],
+      "round_count": 3
+    },
+    "6677495686": {
+      "referred": [
+        7569797563
+      ],
+      "tickets": [],
+      "round_count": 1
     }
   },
   "history": [
@@ -147,6 +245,57 @@
       "time": "2025-08-06T18:25:45.410007",
       "participants": 10,
       "tickets": 1
+    },
+    {
+      "action": "paused",
+      "time": "2025-08-12T16:49:43.903978",
+      "participants": 10,
+      "tickets": 1
+    },
+    {
+      "action": "started",
+      "time": "2025-08-12T16:49:48.588677"
+    },
+    {
+      "action": "paused",
+      "time": "2025-08-12T16:49:53.721277",
+      "participants": 10,
+      "tickets": 0
+    },
+    {
+      "action": "started",
+      "time": "2025-08-12T16:49:56.327165"
+    },
+    {
+      "action": "paused",
+      "time": "2025-08-12T16:57:13.880463",
+      "participants": 12,
+      "tickets": 1
+    },
+    {
+      "action": "paused",
+      "round": 1,
+      "time": "2025-08-12T17:20:53.872823",
+      "participants": 0,
+      "tickets": 1
+    },
+    {
+      "action": "started",
+      "round": 2,
+      "time": "2025-08-12T17:20:57.941394"
+    },
+    {
+      "action": "paused",
+      "round": 2,
+      "time": "2025-08-12T20:24:19.084770",
+      "participants": 9,
+      "tickets": 3
+    },
+    {
+      "action": "started",
+      "round": 3,
+      "time": "2025-08-12T20:24:27.028697"
     }
-  ]
+  ],
+  "current_round": 3
 }

@@ -20,24 +20,25 @@ def get_users():
     except Exception:
         return []
 
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, command):
-    # Реферальная логика: сохраняем связь при /start, учет после подписки
+    # Сохраняем связь при /start (без зачёта)
     args = command.args or ""
     if referrals.is_active() and args.startswith("ref_"):
         try:
             referrer_id = int(args.split("_", 1)[1])
         except ValueError:
             referrer_id = None
+
         user_key = str(message.from_user.id)
         data = referrals.load_data()
         if referrer_id and referrer_id != message.from_user.id:
-            # записываем, если еще не было
             if user_key not in data["users"]:
                 data["users"][user_key] = {"referrer": referrer_id, "counted": False}
                 referrals.save_data(data)
 
-    # Основной start — регистрация и приветствие
+    # Регистрируем пользователя для рассылок
     user_id = message.from_user.id
     try:
         with open("users.json", "r", encoding="utf-8") as f:
@@ -50,8 +51,8 @@ async def cmd_start(message: Message, command):
             json.dump(users, f, ensure_ascii=False, indent=2)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Подписаться на канал", url=CHANNEL_LINK)],
-        [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")],
+        [InlineKeyboardButton(text="✍Подписаться на канал", url=CHANNEL_LINK)],
+        [InlineKeyboardButton(text="‼Проверить подписку", callback_data="check_sub")],
     ])
     await message.answer(
         "🎉 Привет друг! \n"
@@ -65,49 +66,99 @@ async def cmd_start(message: Message, command):
         reply_markup=kb
     )
 
+
 @router.callback_query(lambda c: c.data == "check_sub")
 async def check_subscription(callback: CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         if member.status in ("member", "creator", "administrator"):
-            # Учет реферала после подтверждения подписки
-            user_key = str(user_id)
+            # Зачёт реферала только после подтверждения подписки
             data = referrals.load_data()
+            threshold = data.get("threshold", 3)
+            active = data.get("active", True)
+
+            user_key = str(user_id)
             user_data = data["users"].get(user_key)
             if user_data and not user_data.get("counted", False):
-                referrer_id = user_data["referrer"]
+                referrer_id = int(user_data["referrer"])
                 ref_key = str(referrer_id)
-                ref_data = data["referrers"].setdefault(ref_key, {"referred": [], "tickets": []})
-                ref_data["referred"].append(user_id)
-                data["users"][user_key]["counted"] = True
-                # Генерация билета по кратным порогам
-                threshold = data.get("threshold", 3)
-                count = len(ref_data["referred"])
-                if threshold > 0 and count % threshold == 0:
-                    data["last_ticket"] = data.get("last_ticket", 0) + 1
-                    ticket_no = data["last_ticket"]
-                    ref_data["tickets"].append(ticket_no)
-                    # уведомляем реферера
+                ref_info = data["referrers"].setdefault(
+                    ref_key, {"referred": [], "tickets": [], "round_count": 0}
+                )
+
+                # Исторический учёт (вообще по проекту)
+                if user_id not in ref_info["referred"]:
+                    ref_info["referred"].append(user_id)
+
+                # В текущем розыгрыше считаем только если он активен
+                if active:
+                    ref_info["round_count"] = int(ref_info.get("round_count", 0)) + 1
+
+                    # Оповещение рефереру о новом реферале
                     try:
+                        progress = ref_info["round_count"] % threshold
+                        remain = threshold - progress if progress != 0 else 0
                         await bot.send_message(
                             referrer_id,
-                            f"🎁 Поздравляем! Вы набрали {threshold} рефералов и получили бесплатный билет №{ticket_no}!"
+                            (
+                                "👥 У вас новый реферал!\n"
+                                f"Прогресс текущего розыгрыша: {ref_info['round_count']}/{threshold}.\n"
+                                f"{'До билета осталось: ' + str(remain) if remain else 'Сейчас получите билет!'}"
+                            )
                         )
                     except Exception:
                         pass
+
+                    # Билет каждые threshold
+                    if threshold > 0 and (ref_info["round_count"] % threshold == 0):
+                        code = referrals.generate_unique_code(data)
+                        ref_info["tickets"].append(code)
+
+                        # Пользователю (рефереру)
+                        try:
+                            await bot.send_message(
+                                referrer_id,
+                                (
+                                    "🎁 Поздравляем! Вы выполнили условия и получили бесплатный билет!\n"
+                                    f"Ваш код: <b>{code}</b>\n\n"
+                                    "Сохраните его — по этим кодам будет проводиться розыгрыш."
+                                ),
+                                parse_mode="HTML"
+                            )
+                        except Exception:
+                            pass
+
+                        # Админу
+                        try:
+                            ref_chat = await bot.get_chat(referrer_id)
+                            ref_name = f"@{ref_chat.username}" if ref_chat.username else (ref_chat.full_name or f"id{referrer_id}")
+                        except Exception:
+                            ref_name = f"id{referrer_id}"
+                        try:
+                            await bot.send_message(
+                                ADMIN_CHAT_ID,
+                                f"🎟 Выдан бесплатный билет {ref_name} — код: <b>{code}</b> (порог {threshold})",
+                                parse_mode="HTML"
+                            )
+                        except Exception:
+                            pass
+
+                # Помечаем приглашённого как учтённого (чтобы не накрутить)
+                data["users"][user_key]["counted"] = True
                 referrals.save_data(data)
 
             kb_buy = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Купить стикер", callback_data="start_buy")],
-                [InlineKeyboardButton(text="📣 Реферальная система", callback_data="referral_info")],
+                [InlineKeyboardButton(text="🎟Купить стикер", callback_data="start_buy")],
+                [InlineKeyboardButton(text="🤝Реферальная ссылка для друга", callback_data="referral_info")],
             ])
             await callback.message.answer(
                 "✅ Подписка успешно подтверждена! Спасибо, что с нами! 🤗 Теперь ты можешь принять участие в розыгрыше и выиграть крутые призы! 🎁✨\n\n"
                 "🎟 Чтобы участвовать — купи стикеры (они же билеты на участие в розыгрыше)!\n"
                 "Чем больше стикеров — тем выше шанс на победу! 🔥\n\n"
-                "📥 Нажми кнопку «Купить стикер» и введи, сколько штук хочешь приобрести.\n\n"
-                "Удачи в розыгрыше! 🍀 Мы верим, именно ты станешь победителем! 🏆 \n\n"
+                "🤝 Раздел «РЕФЕРАЛЬНАЯ СИСТЕМА»\n"
+                "Делитесь своей реферальной ссылкой с друзьями, получайте бесплатные билеты за приглашения и участвуйте в специальных розыгрышах для активных участников!\n\n"
+                "Удачи в розыгрыше! 🍀 Мы верим, именно ты станешь победителем! 🏆\n\n"
                 "❗️По интересующим вопросам: @CuttySark_81",
                 reply_markup=kb_buy
             )
@@ -116,6 +167,7 @@ async def check_subscription(callback: CallbackQuery, bot: Bot):
     except Exception:
         await callback.message.answer("⚠ Не удалось проверить подписку. Попробуйте позже.")
     await callback.answer()
+
 
 @router.callback_query(lambda c: c.data == "start_buy")
 async def start_buy_sticker(callback: CallbackQuery, state: FSMContext):
@@ -128,6 +180,7 @@ async def start_buy_sticker(callback: CallbackQuery, state: FSMContext):
         "Ждём твой выбор! ⬇️"
     )
     await state.set_state(BuySticker.waiting_qty)
+
 
 @router.message(StateFilter(BuySticker.waiting_qty))
 async def process_qty(message: Message, state: FSMContext):
@@ -161,6 +214,7 @@ async def process_qty(message: Message, state: FSMContext):
     )
     await state.set_state(Application.waiting_fio)
 
+
 @router.message(StateFilter(Application.waiting_fio))
 async def process_fio(message: Message, state: FSMContext):
     if not message.text:
@@ -177,6 +231,7 @@ async def process_fio(message: Message, state: FSMContext):
         "🏆 Он нужен для проверки платежа и связи с вами в случае выигрыша"
     )
     await state.set_state(Application.waiting_phone)
+
 
 @router.message(StateFilter(Application.waiting_phone))
 async def process_phone(message: Message, state: FSMContext):
@@ -196,6 +251,7 @@ async def process_phone(message: Message, state: FSMContext):
     )
     await state.set_state(Application.waiting_photo)
 
+
 @router.message(StateFilter(Application.waiting_photo))
 async def process_photo(message: Message, state: FSMContext, bot: Bot):
     file_id = None
@@ -212,6 +268,7 @@ async def process_photo(message: Message, state: FSMContext, bot: Bot):
     else:
         await message.answer("❗Пожалуйста, отправьте изображение (фото) или PDF-файл.")
         return
+
     data = await state.get_data()
     qty = data.get('qty')
     text = (
@@ -242,25 +299,32 @@ async def process_photo(message: Message, state: FSMContext, bot: Bot):
     )
     await state.clear()
 
+
 @router.callback_query(lambda c: c.data == "referral_info")
 async def referral_info(callback: CallbackQuery):
     user_key = str(callback.from_user.id)
     data = referrals.load_data()
-    ref_data = data.get("referrers", {}).get(user_key, {"referred": [], "tickets": []})
-    referred = ref_data.get("referred", [])
-    tickets = ref_data.get("tickets", [])
+    ref_info = data.get("referrers", {}).get(user_key, {"referred": [], "tickets": [], "round_count": 0})
+    total_referred = len(ref_info.get("referred", []))
+    tickets = [str(x) for x in ref_info.get("tickets", [])]
     me = await callback.bot.get_me()
     link = f"https://t.me/{me.username}?start=ref_{callback.from_user.id}"
     text = (
         f"📊 <b>Ваша реферальная статистика</b>\n\n"
-        f"👥 Приглашено: <b>{len(referred)}</b>\n"
+        "🚀 Приглашай друзей и получай бесплатные билеты для участия в специальных розыгрышах, которые мы проводим регулярно — и абсолютно бесплатно!\n"
+        "Чем больше друзей — тем больше билетов и выше шанс забрать крутые призы! 🎁\n\n"
+        "‼️ Важно:\n"
+        "1️⃣ Количество друзей, необходимых для одного билета, может отличаться в зависимости от условий текущего розыгрыша.\n"
+        "2️⃣ Чтобы друг засчитался, он должен активировать бота и подписаться на наш канал — только после этого он отобразится в вашей статистике.\n\n"
+        f"👥 Приглашено: <b>{total_referred}</b>\n"
         f"🎫 Получено бесплатных билетов: <b>{len(tickets)}</b>\n"
     )
     if tickets:
-        text += "Номера билетов: " + ", ".join(str(n) for n in tickets) + "\n\n"
+        text += "Номера билетов: " + ", ".join(tickets) + "\n\n"
     text += f"🔗 Ваша ссылка: {link}"
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
+
 
 @router.callback_query(lambda c: c.data in ("approve", "reject"))
 async def handle_decision(callback: CallbackQuery, bot: Bot):
@@ -270,9 +334,8 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
         return
 
     try:
-        chat_member = await bot.get_chat_member(user_id=user_id, chat_id=user_id)
-        username = chat_member.user.username
-        user_display = f"@{username}" if username else f"id{user_id}"
+        chat = await bot.get_chat(user_id)
+        user_display = f"@{chat.username}" if chat.username else (chat.full_name or f"id{user_id}")
     except Exception:
         user_display = f"id{user_id}"
 
@@ -295,7 +358,7 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
             "👇 Хотите увеличить шансы?\n"
             "Вы можете приобрести ещё стикеры, гоу 👇"
         )
-        await bot.send_message(user_id, msg,	reply_markup=buy_more_kb)
+        await bot.send_message(user_id, msg, reply_markup=buy_more_kb)
         await bot.send_message(
             ADMIN_CHAT_ID,
             f"✅ Заявка пользователя {user_display} подтверждена",
@@ -316,6 +379,7 @@ async def handle_decision(callback: CallbackQuery, bot: Bot):
         )
 
     await callback.answer("Готово.")
+
 
 # ---------------------------
 # БЛОКИРОВКА ЛЮБЫХ ЛИЧНЫХ СООБЩЕНИЙ ВНЕ СЦЕНАРИЯ (СТРОГО В КОНЦЕ ФАЙЛА)
